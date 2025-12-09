@@ -1,0 +1,103 @@
+
+============================================================================
+                         AERIE HELM CHART
+============================================================================
+
+Thank you for installing {{ .Chart.Name }}!
+
+Release: {{ .Release.Name }}
+Namespace: {{ .Release.Namespace }}
+
+============================================================================
+                         ACCESSING AERIE
+============================================================================
+
+{{- if .Values.istio.enabled }}
+Aerie is exposed via Istio VirtualService at:
+  https://{{ .Values.istio.host }}
+
+Routes:
+  - UI:        https://{{ .Values.istio.host }}/
+  - GraphQL:   https://{{ .Values.istio.host }}/v1/graphql
+  - Gateway:   https://{{ .Values.istio.host }}/auth/, /file/, /health
+  - Action:    https://{{ .Values.istio.host }}/action/
+  - Workspace: https://{{ .Values.istio.host }}/workspace/
+{{- else }}
+
+To access Aerie, use kubectl port-forward:
+
+  # UI (main interface)
+  kubectl port-forward -n {{ .Release.Namespace }} svc/{{ include "aerie.fullname" . }}-ui 3000:{{ .Values.ui.service.port }}
+
+  # Hasura GraphQL Console
+  kubectl port-forward -n {{ .Release.Namespace }} svc/{{ include "aerie.fullname" . }}-hasura 8080:{{ .Values.hasura.service.port }}
+
+  # Gateway API
+  kubectl port-forward -n {{ .Release.Namespace }} svc/{{ include "aerie.fullname" . }}-gateway 9000:{{ .Values.gateway.service.port }}
+
+Then access:
+  - UI: http://localhost:3000
+  - Hasura Console: http://localhost:8080/console
+  - Gateway: http://localhost:9000
+
+{{- end }}
+
+============================================================================
+                         DATABASE
+============================================================================
+
+{{- if .Values.postgresql.enabled }}
+PostgreSQL is deployed as part of this release.
+  Host: {{ include "aerie.fullname" . }}-postgres
+  Port: 5432
+  Database: aerie
+
+To connect:
+  kubectl port-forward -n {{ .Release.Namespace }} svc/{{ include "aerie.fullname" . }}-postgres 5432:5432
+{{- else }}
+Using external PostgreSQL:
+  Host: {{ .Values.externalPostgresql.host }}
+  Port: {{ .Values.externalPostgresql.port }}
+  Database: {{ .Values.externalPostgresql.database }}
+{{- end }}
+
+============================================================================
+                         COMPONENTS STATUS
+============================================================================
+
+Check the status of all pods:
+  kubectl get pods -n {{ .Release.Namespace }} -l app.kubernetes.io/instance={{ .Release.Name }}
+
+Watch pods come up:
+  kubectl get pods -n {{ .Release.Namespace }} -l app.kubernetes.io/instance={{ .Release.Name }} -w
+
+============================================================================
+                         AUTHENTICATION
+============================================================================
+
+{{- if eq .Values.gateway.auth.type "none" }}
+Authentication is DISABLED. All users have admin access.
+This is suitable for development but NOT for production!
+{{- else if eq .Values.gateway.auth.type "cam" }}
+CAM authentication is enabled.
+Auth URL: {{ .Values.gateway.auth.url }}
+{{- end }}
+
+{{- if .Values.ui.auth.oidcEnabled }}
+OIDC authentication is ENABLED for the UI.
+{{- end }}
+
+Hasura Admin Secret: (stored in secret {{ include "aerie.fullname" . }}-hasura-secrets)
+  kubectl get secret -n {{ .Release.Namespace }} {{ include "aerie.fullname" . }}-hasura-secrets -o jsonpath='{.data.admin-secret}' | base64 -d
+
+============================================================================
+                         TROUBLESHOOTING
+============================================================================
+
+View logs for a specific component:
+  kubectl logs -n {{ .Release.Namespace }} -l app.kubernetes.io/component=<component> -f
+
+Components: postgres, hasura, merlin, merlin-worker, scheduler, scheduler-worker,
+            sequencing, action, workspace, gateway, ui
+
+============================================================================

@@ -1,0 +1,18 @@
+{{- if .Values.sequencing.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "aerie.fullname" . }}-sequencing
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "aerie.componentLabels" (dict "root" . "component" "sequencing") | nindent 4 }}
+spec:
+  type: ClusterIP
+  ports:
+    - name: http
+      port: {{ .Values.sequencing.port }}
+      targetPort: http
+      protocol: TCP
+  selector:
+    {{- include "aerie.componentSelectorLabels" (dict "root" . "component" "sequencing") | nindent 4 }}
+{{- end }}

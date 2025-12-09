@@ -1,0 +1,18 @@
+{{- if .Values.postgresql.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "aerie.fullname" . }}-postgres
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "aerie.componentLabels" (dict "root" . "component" "postgres") | nindent 4 }}
+spec:
+  type: ClusterIP
+  ports:
+    - name: postgres
+      port: 5432
+      targetPort: postgres
+      protocol: TCP
+  selector:
+    {{- include "aerie.componentSelectorLabels" (dict "root" . "component" "postgres") | nindent 4 }}
+{{- end }}

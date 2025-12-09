@@ -1,0 +1,18 @@
+{{- if .Values.scheduler.server.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "aerie.fullname" . }}-scheduler
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "aerie.componentLabels" (dict "root" . "component" "scheduler") | nindent 4 }}
+spec:
+  type: ClusterIP
+  ports:
+    - name: http
+      port: {{ .Values.scheduler.server.port }}
+      targetPort: http
+      protocol: TCP
+  selector:
+    {{- include "aerie.componentSelectorLabels" (dict "root" . "component" "scheduler") | nindent 4 }}
+{{- end }}

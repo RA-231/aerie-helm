@@ -1,0 +1,18 @@
+{{- if .Values.hasura.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "aerie.fullname" . }}-hasura
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "aerie.componentLabels" (dict "root" . "component" "hasura") | nindent 4 }}
+spec:
+  type: {{ .Values.hasura.service.type }}
+  ports:
+    - name: http
+      port: {{ .Values.hasura.service.port }}
+      targetPort: http
+      protocol: TCP
+  selector:
+    {{- include "aerie.componentSelectorLabels" (dict "root" . "component" "hasura") | nindent 4 }}
+{{- end }}

@@ -1,0 +1,118 @@
+{{- if .Values.gateway.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "aerie.fullname" . }}-gateway
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "aerie.componentLabels" (dict "root" . "component" "gateway") | nindent 4 }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      {{- include "aerie.componentSelectorLabels" (dict "root" . "component" "gateway") | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "aerie.componentSelectorLabels" (dict "root" . "component" "gateway") | nindent 8 }}
+    spec:
+      {{- with .Values.global.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      initContainers:
+        - name: wait-for-postgres
+          image: busybox:1.36
+          command: ['sh', '-c', 'until nc -z {{ include "aerie.postgresql.host" . }} {{ include "aerie.postgresql.port" . }}; do echo waiting for postgres; sleep 2; done']
+      containers:
+        - name: gateway
+          image: {{ include "aerie.image" (dict "root" . "repository" .Values.gateway.image.repository "tag" .Values.gateway.image.tag) | quote }}
+          imagePullPolicy: {{ .Values.global.imagePullPolicy }}
+          ports:
+            - name: http
+              containerPort: {{ .Values.gateway.port }}
+              protocol: TCP
+          env:
+            - name: PORT
+              value: {{ .Values.gateway.port | quote }}
+            - name: AERIE_DB_HOST
+              value: {{ include "aerie.postgresql.host" . | quote }}
+            - name: AERIE_DB_PORT
+              value: {{ include "aerie.postgresql.port" . | quote }}
+            - name: GATEWAY_DB_USER
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "aerie.postgresql.secretName" . }}
+                  key: gateway-user
+            - name: GATEWAY_DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "aerie.postgresql.secretName" . }}
+                  key: gateway-password
+            - name: HASURA_GRAPHQL_JWT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "aerie.fullname" . }}-hasura-secrets
+                  key: jwt-secret
+            # Hasura URLs - internal K8s service names
+            - name: HASURA_API_URL
+              value: {{ include "aerie.hasura.url" . | quote }}
+            - name: GQL_API_URL
+              value: {{ include "aerie.hasura.graphqlUrl" . | quote }}
+            - name: LOG_FILE
+              value: console
+            - name: LOG_LEVEL
+              value: {{ .Values.gateway.logLevel | quote }}
+            # Authentication configuration
+            - name: AUTH_TYPE
+              value: {{ .Values.gateway.auth.type | quote }}
+            {{- if eq .Values.gateway.auth.type "cam" }}
+            - name: AUTH_URL
+              value: {{ .Values.gateway.auth.url | quote }}
+            - name: AUTH_UI_URL
+              value: {{ .Values.gateway.auth.uiUrl | quote }}
+            - name: AUTH_SSO_TOKEN_NAME
+              value: {{ .Values.gateway.auth.ssoTokenName | quote }}
+            - name: AUTH_GROUP_ROLE_MAPPINGS
+              value: {{ .Values.gateway.auth.groupRoleMappings | quote }}
+            {{- end }}
+          volumeMounts:
+            - name: file-store
+              mountPath: /app/files
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 15
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 6
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 3
+          resources:
+            {{- toYaml .Values.gateway.resources | nindent 12 }}
+      volumes:
+        - name: file-store
+          persistentVolumeClaim:
+            claimName: {{ include "aerie.fileStore.pvcName" . }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+{{- end }}

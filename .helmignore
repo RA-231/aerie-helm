@@ -1,0 +1,30 @@
+# Patterns to ignore when building packages.
+# This supports shell glob matching, relative path matching, and
+# temporary file patterns.
+
+# Git
+.git/
+.gitignore
+
+# Task
+Taskfile.yaml
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+
+# CI/CD
+.github/
+.gitlab-ci.yml
+
+# Agent context
+CLAUDE.md
+
+# Build output
+dist/

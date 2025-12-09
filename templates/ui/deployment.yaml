@@ -1,0 +1,126 @@
+{{- if .Values.ui.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "aerie.fullname" . }}-ui
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "aerie.componentLabels" (dict "root" . "component" "ui") | nindent 4 }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      {{- include "aerie.componentSelectorLabels" (dict "root" . "component" "ui") | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "aerie.componentSelectorLabels" (dict "root" . "component" "ui") | nindent 8 }}
+    spec:
+      {{- with .Values.global.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      containers:
+        - name: ui
+          image: {{ include "aerie.image" (dict "root" . "repository" .Values.ui.image.repository "tag" .Values.ui.image.tag) | quote }}
+          imagePullPolicy: {{ .Values.global.imagePullPolicy }}
+          ports:
+            - name: http
+              containerPort: {{ .Values.ui.port }}
+              protocol: TCP
+          env:
+            # ORIGIN should be set to the external URL users access
+            - name: ORIGIN
+              value: {{ .Values.ui.origin | default "http://localhost" | quote }}
+            - name: PUBLIC_AERIE_FILE_STORE_PREFIX
+              value: {{ .Values.ui.fileStorePrefix | quote }}
+            - name: PUBLIC_COMMAND_EXPANSION_MODE
+              value: {{ .Values.ui.commandExpansionMode | quote }}
+            # Server-side URLs (for SSR) - use internal K8s service names
+            - name: PUBLIC_GATEWAY_SERVER_URL
+              value: {{ include "aerie.gateway.url" . | quote }}
+            - name: PUBLIC_HASURA_SERVER_URL
+              value: {{ include "aerie.hasura.graphqlUrl" . | quote }}
+            # Client-side URLs - these must be accessible from user's browser
+            # When using ingress, these should point to the ingress host
+            # For now, default to the same as server URLs (works with port-forward)
+            - name: PUBLIC_GATEWAY_CLIENT_URL
+              value: {{ .Values.ui.clientUrls.gateway | default (include "aerie.gateway.url" .) | quote }}
+            - name: PUBLIC_HASURA_CLIENT_URL
+              value: {{ .Values.ui.clientUrls.hasura | default (include "aerie.hasura.graphqlUrl" .) | quote }}
+            - name: PUBLIC_HASURA_WEB_SOCKET_URL
+              value: {{ .Values.ui.clientUrls.hasuraWs | default (printf "ws://%s-hasura:%d/v1/graphql" (include "aerie.fullname" .) (.Values.hasura.service.port | int)) | quote }}
+            - name: PUBLIC_ACTION_CLIENT_URL
+              value: {{ .Values.ui.clientUrls.action | default (include "aerie.action.url" .) | quote }}
+            - name: PUBLIC_WORKSPACE_CLIENT_URL
+              value: {{ .Values.ui.clientUrls.workspace | default (include "aerie.workspace.url" .) | quote }}
+            # Auth configuration
+            - name: PUBLIC_AUTH_SSO_ENABLED
+              value: {{ .Values.ui.auth.ssoEnabled | quote }}
+            - name: PUBLIC_AUTH_OIDC_ENABLED
+              value: {{ .Values.ui.auth.oidcEnabled | quote }}
+            {{- if .Values.ui.auth.oidcEnabled }}
+            # OIDC configuration
+            - name: OIDC_WELL_KNOWN_URL
+              value: {{ .Values.ui.auth.oidc.wellKnownUrl | quote }}
+            - name: OIDC_AUTHORIZATION_URL
+              value: {{ .Values.ui.auth.oidc.authorizationUrl | quote }}
+            - name: OIDC_TOKEN_URL
+              value: {{ .Values.ui.auth.oidc.tokenUrl | quote }}
+            - name: OIDC_LOGOUT_URL
+              value: {{ .Values.ui.auth.oidc.logoutUrl | quote }}
+            - name: OIDC_JWKS_URL
+              value: {{ .Values.ui.auth.oidc.jwksUrl | quote }}
+            - name: OIDC_ISSUER
+              value: {{ .Values.ui.auth.oidc.issuer | quote }}
+            - name: OIDC_CLIENT_ID
+              value: {{ .Values.ui.auth.oidc.clientId | quote }}
+            - name: OIDC_CLIENT_SECRET
+              {{- if .Values.ui.auth.oidc.existingSecret }}
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.ui.auth.oidc.existingSecret }}
+                  key: oidc-client-secret
+              {{- else }}
+              value: {{ .Values.ui.auth.oidc.clientSecret | quote }}
+              {{- end }}
+            - name: OIDC_REDIRECT_URI
+              value: {{ .Values.ui.auth.oidc.redirectUri | quote }}
+            - name: OIDC_AUDIENCE
+              value: {{ .Values.ui.auth.oidc.audience | quote }}
+            - name: OIDC_SCOPES
+              value: {{ .Values.ui.auth.oidc.scopes | quote }}
+            {{- end }}
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 15
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 6
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 3
+          resources:
+            {{- toYaml .Values.ui.resources | nindent 12 }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+{{- end }}

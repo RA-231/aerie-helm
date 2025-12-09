@@ -1,0 +1,143 @@
+{{- if .Values.postgresql.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "aerie.fullname" . }}-postgres
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "aerie.componentLabels" (dict "root" . "component" "postgres") | nindent 4 }}
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      {{- include "aerie.componentSelectorLabels" (dict "root" . "component" "postgres") | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "aerie.componentSelectorLabels" (dict "root" . "component" "postgres") | nindent 8 }}
+    spec:
+      {{- with .Values.global.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      containers:
+        - name: postgres
+          image: {{ include "aerie.image" (dict "root" . "repository" .Values.postgresql.image.repository "tag" .Values.postgresql.image.tag) | quote }}
+          imagePullPolicy: {{ .Values.global.imagePullPolicy }}
+          ports:
+            - name: postgres
+              containerPort: 5432
+              protocol: TCP
+          env:
+            - name: POSTGRES_DB
+              value: postgres
+            - name: POSTGRES_USER
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "aerie.postgresql.secretName" . }}
+                  key: postgres-user
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "aerie.postgresql.secretName" . }}
+                  key: postgres-password
+            - name: AERIE_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "aerie.postgresql.secretName" . }}
+                  key: aerie-user
+            - name: AERIE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "aerie.postgresql.secretName" . }}
+                  key: aerie-password
+            - name: MERLIN_DB_USER
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "aerie.postgresql.secretName" . }}
+                  key: merlin-user
+            - name: MERLIN_DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "aerie.postgresql.secretName" . }}
+                  key: merlin-password
+            - name: SCHEDULER_DB_USER
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "aerie.postgresql.secretName" . }}
+                  key: scheduler-user
+            - name: SCHEDULER_DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "aerie.postgresql.secretName" . }}
+                  key: scheduler-password
+            - name: SEQUENCING_DB_USER
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "aerie.postgresql.secretName" . }}
+                  key: sequencing-user
+            - name: SEQUENCING_DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "aerie.postgresql.secretName" . }}
+                  key: sequencing-password
+            - name: GATEWAY_DB_USER
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "aerie.postgresql.secretName" . }}
+                  key: gateway-user
+            - name: GATEWAY_DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "aerie.postgresql.secretName" . }}
+                  key: gateway-password
+          {{- if .Values.postgresql.persistence.enabled }}
+          volumeMounts:
+            - name: postgres-data
+              mountPath: /var/lib/postgresql/data
+          {{- end }}
+          livenessProbe:
+            exec:
+              command:
+                - pg_isready
+                - -U
+                - postgres
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 6
+          readinessProbe:
+            exec:
+              command:
+                - pg_isready
+                - -U
+                - postgres
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 3
+          resources:
+            {{- toYaml .Values.postgresql.resources | nindent 12 }}
+      {{- if .Values.postgresql.persistence.enabled }}
+      volumes:
+        - name: postgres-data
+          persistentVolumeClaim:
+            claimName: {{ include "aerie.postgres.pvcName" . }}
+      {{- end }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+{{- end }}

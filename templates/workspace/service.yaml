@@ -1,0 +1,18 @@
+{{- if .Values.workspace.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "aerie.fullname" . }}-workspace
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "aerie.componentLabels" (dict "root" . "component" "workspace") | nindent 4 }}
+spec:
+  type: ClusterIP
+  ports:
+    - name: http
+      port: {{ .Values.workspace.port }}
+      targetPort: http
+      protocol: TCP
+  selector:
+    {{- include "aerie.componentSelectorLabels" (dict "root" . "component" "workspace") | nindent 4 }}
+{{- end }}

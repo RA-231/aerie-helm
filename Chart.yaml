@@ -1,0 +1,20 @@
+apiVersion: v2
+name: aerie
+description: A Helm chart for deploying NASA-AMMOS Aerie mission planning system
+type: application
+version: 0.1.0
+appVersion: "3.8.1"
+keywords:
+  - aerie
+  - nasa
+  - mission-planning
+  - scheduling
+  - sequencing
+home: https://github.com/NASA-AMMOS/aerie
+sources:
+  - https://github.com/NASA-AMMOS/aerie
+  - https://github.com/NASA-AMMOS/aerie-gateway
+  - https://github.com/NASA-AMMOS/aerie-ui
+maintainers:
+  - name: NASA-AMMOS
+    url: https://github.com/NASA-AMMOS

@@ -1,0 +1,23 @@
+{{- if and .Values.merlin.worker.enabled .Values.merlin.worker.autoscaling.enabled }}
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: {{ include "aerie.fullname" . }}-merlin-worker
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "aerie.componentLabels" (dict "root" . "component" "merlin-worker") | nindent 4 }}
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: {{ include "aerie.fullname" . }}-merlin-worker
+  minReplicas: {{ .Values.merlin.worker.autoscaling.minReplicas }}
+  maxReplicas: {{ .Values.merlin.worker.autoscaling.maxReplicas }}
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: {{ .Values.merlin.worker.autoscaling.targetCPUUtilizationPercentage }}
+{{- end }}

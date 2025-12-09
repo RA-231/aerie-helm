@@ -1,0 +1,138 @@
+{{- if .Values.hasura.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "aerie.fullname" . }}-hasura
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "aerie.componentLabels" (dict "root" . "component" "hasura") | nindent 4 }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      {{- include "aerie.componentSelectorLabels" (dict "root" . "component" "hasura") | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "aerie.componentSelectorLabels" (dict "root" . "component" "hasura") | nindent 8 }}
+    spec:
+      {{- with .Values.global.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      initContainers:
+        - name: wait-for-postgres
+          image: busybox:1.36
+          command: ['sh', '-c', 'until nc -z {{ include "aerie.postgresql.host" . }} {{ include "aerie.postgresql.port" . }}; do echo waiting for postgres; sleep 2; done']
+        - name: encode-credentials
+          image: busybox:1.36
+          command:
+            - sh
+            - -c
+            - |
+              # URL-encode function using sed (POSIX compatible)
+              urlencode() {
+                echo -n "$1" | sed 's/%/%25/g; s/ /%20/g; s/!/%21/g; s/"/%22/g; s/#/%23/g; s/\$/%24/g; s/\&/%26/g; s/'"'"'/%27/g; s/(/%28/g; s/)/%29/g; s/\*/%2A/g; s/+/%2B/g; s/,/%2C/g; s/\//%2F/g; s/:/%3A/g; s/;/%3B/g; s/=/%3D/g; s/?/%3F/g; s/@/%40/g; s/\[/%5B/g; s/\]/%5D/g'
+              }
+              # Build full database URLs with encoded credentials
+              ENCODED_USER=$(urlencode "$AERIE_DB_USER")
+              ENCODED_PASS=$(urlencode "$AERIE_DB_PASSWORD")
+
+              echo "postgres://${ENCODED_USER}:${ENCODED_PASS}@{{ include "aerie.postgresql.host" . }}:{{ include "aerie.postgresql.port" . }}/aerie?options=-c%20search_path%3Dutil_functions%2Chasura%2Cpermissions%2Ctags%2Cmerlin%2Cscheduler%2Csequencing%2Cactions%2Cui%2Cpublic" > /env/AERIE_DATABASE_URL
+              echo "postgres://${ENCODED_USER}:${ENCODED_PASS}@{{ include "aerie.postgresql.host" . }}:{{ include "aerie.postgresql.port" . }}/aerie_hasura" > /env/HASURA_GRAPHQL_METADATA_DATABASE_URL
+              echo "Database URLs generated successfully"
+          env:
+            - name: AERIE_DB_USER
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "aerie.postgresql.secretName" . }}
+                  key: aerie-user
+            - name: AERIE_DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "aerie.postgresql.secretName" . }}
+                  key: aerie-password
+          volumeMounts:
+            - name: encoded-env
+              mountPath: /env
+      containers:
+        - name: hasura
+          image: {{ include "aerie.image" (dict "root" . "repository" .Values.hasura.image.repository "tag" .Values.hasura.image.tag) | quote }}
+          imagePullPolicy: {{ .Values.global.imagePullPolicy }}
+          # Use the built-in cli-migrations entrypoint which auto-applies metadata
+          # The entrypoint wrapper in the Docker image reads URL-encoded DB URLs from /env
+          ports:
+            - name: http
+              containerPort: 8080
+              protocol: TCP
+          volumeMounts:
+            - name: encoded-env
+              mountPath: /env
+              readOnly: true
+          env:
+            # Service URLs - using correct K8s service names (hyphens, not underscores!)
+            - name: AERIE_MERLIN_URL
+              value: {{ include "aerie.merlin.url" . | quote }}
+            - name: AERIE_SCHEDULER_URL
+              value: {{ include "aerie.scheduler.url" . | quote }}
+            - name: AERIE_SEQUENCING_URL
+              value: {{ include "aerie.sequencing.url" . | quote }}
+            # Hasura configuration
+            - name: HASURA_GRAPHQL_ADMIN_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.hasura.existingSecret | default (printf "%s-hasura-secrets" (include "aerie.fullname" .)) }}
+                  key: admin-secret
+            - name: HASURA_GRAPHQL_JWT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.hasura.existingSecret | default (printf "%s-hasura-secrets" (include "aerie.fullname" .)) }}
+                  key: jwt-secret
+            - name: HASURA_GRAPHQL_DEV_MODE
+              value: {{ .Values.hasura.devMode | quote }}
+            - name: HASURA_GRAPHQL_ENABLE_CONSOLE
+              value: {{ .Values.hasura.enableConsole | quote }}
+            - name: HASURA_GRAPHQL_LOG_LEVEL
+              value: {{ .Values.hasura.logLevel | quote }}
+            - name: HASURA_GRAPHQL_ENABLED_LOG_TYPES
+              value: "startup, http-log, webhook-log, websocket-log, query-log"
+            - name: HASURA_GRAPHQL_METADATA_DIR
+              value: /hasura-metadata
+            - name: HASURA_GRAPHQL_INFER_FUNCTION_PERMISSIONS
+              value: "false"
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 6
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 3
+          resources:
+            {{- toYaml .Values.hasura.resources | nindent 12 }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      volumes:
+        - name: encoded-env
+          emptyDir: {}
+{{- end }}

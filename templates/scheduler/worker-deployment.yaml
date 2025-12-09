@@ -1,0 +1,106 @@
+{{- if .Values.scheduler.worker.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "aerie.fullname" . }}-scheduler-worker
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "aerie.componentLabels" (dict "root" . "component" "scheduler-worker") | nindent 4 }}
+spec:
+  replicas: {{ .Values.scheduler.worker.replicas }}
+  selector:
+    matchLabels:
+      {{- include "aerie.componentSelectorLabels" (dict "root" . "component" "scheduler-worker") | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "aerie.componentSelectorLabels" (dict "root" . "component" "scheduler-worker") | nindent 8 }}
+    spec:
+      {{- with .Values.global.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      initContainers:
+        - name: wait-for-postgres
+          image: busybox:1.36
+          command: ['sh', '-c', 'until nc -z {{ include "aerie.postgresql.host" . }} {{ include "aerie.postgresql.port" . }}; do echo waiting for postgres; sleep 2; done']
+      containers:
+        - name: scheduler-worker
+          image: {{ include "aerie.image" (dict "root" . "repository" .Values.scheduler.worker.image.repository "tag" .Values.scheduler.worker.image.tag) | quote }}
+          imagePullPolicy: {{ .Values.global.imagePullPolicy }}
+          ports:
+            - name: http
+              containerPort: 8080
+              protocol: TCP
+          env:
+            - name: AERIE_DB_HOST
+              value: {{ include "aerie.postgresql.host" . | quote }}
+            - name: AERIE_DB_PORT
+              value: {{ include "aerie.postgresql.port" . | quote }}
+            - name: SCHEDULER_DB_USER
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "aerie.postgresql.secretName" . }}
+                  key: scheduler-user
+            - name: SCHEDULER_DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "aerie.postgresql.secretName" . }}
+                  key: scheduler-password
+            - name: HASURA_GRAPHQL_ADMIN_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "aerie.fullname" . }}-hasura-secrets
+                  key: admin-secret
+            - name: MERLIN_GRAPHQL_URL
+              value: {{ include "aerie.hasura.graphqlUrl" . | quote }}
+            - name: MERLIN_LOCAL_STORE
+              value: /usr/src/app/merlin_file_store
+            - name: SCHEDULER_OUTPUT_MODE
+              value: {{ .Values.scheduler.worker.outputMode | quote }}
+            - name: MAX_NB_CACHED_SIMULATION_ENGINES
+              value: {{ .Values.scheduler.worker.maxCachedSimulationEngines | quote }}
+            - name: JAVA_OPTS
+              value: {{ .Values.scheduler.worker.javaOpts | quote }}
+          volumeMounts:
+            - name: file-store
+              mountPath: /usr/src/app/merlin_file_store
+              readOnly: true
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 60
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 6
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 3
+          resources:
+            {{- toYaml .Values.scheduler.worker.resources | nindent 12 }}
+      volumes:
+        - name: file-store
+          persistentVolumeClaim:
+            claimName: {{ include "aerie.fileStore.pvcName" . }}
+            readOnly: true
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+{{- end }}

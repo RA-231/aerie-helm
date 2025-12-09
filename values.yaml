@@ -1,0 +1,440 @@
+# Aerie Helm Chart Configuration
+# ================================
+
+global:
+  # Image configuration
+  imageRegistry: ghcr.io/nasa-ammos
+  imageTag: v3.8.1
+  imagePullPolicy: IfNotPresent
+  imagePullSecrets: []
+
+  # Namespace (usually set by helm install -n)
+  # namespace: aerie
+
+# =============================================================================
+# PostgreSQL Configuration
+# =============================================================================
+postgresql:
+
+  # Set to false to use an external database (e.g., CloudNativePG)
+  enabled: true
+
+  image:
+    repository: aerie-postgres
+    tag: ""  # Uses global.imageTag if empty
+
+  # Resources for the postgres container
+  resources:
+    requests:
+      memory: "256Mi"
+      cpu: "100m"
+    limits:
+      memory: "1Gi"
+      cpu: "500m"
+
+  persistence:
+    enabled: true
+    size: 10Gi
+    storageClass: ""  # Use default storage class
+    accessMode: ReadWriteOnce
+
+  # Credentials - CHANGE IN PRODUCTION
+  auth:
+    postgresUser: postgres
+    postgresPassword: postgres
+    aerieUser: aerie
+    aeriePassword: aerie
+
+# External PostgreSQL configuration (used when postgresql.enabled=false)
+externalPostgresql:
+  host: ""
+  port: 5432
+  database: aerie
+  # Name of existing secret containing credentials
+  # Secret must have keys: aerie-user, aerie-password, merlin-user, etc.
+  existingSecret: ""
+  # Or specify credentials directly (not recommended for production)
+  auth:
+    aerieUser: aerie
+    aeriePassword: ""
+    merlinUser: aerie
+    merlinPassword: ""
+    schedulerUser: aerie
+    schedulerPassword: ""
+    sequencingUser: aerie
+    sequencingPassword: ""
+    gatewayUser: aerie
+    gatewayPassword: ""
+
+# =============================================================================
+# Hasura GraphQL Engine
+# =============================================================================
+hasura:
+  enabled: true
+
+  image:
+    repository: aerie-hasura
+    # Uses global.imageTag by default
+
+  # Use an existing secret for Hasura credentials
+  # Secret must have keys: admin-secret, jwt-secret
+  # If set, adminSecret and jwtSecret values below are ignored
+  existingSecret: ""
+
+  # CHANGE IN PRODUCTION - use a strong secret
+  adminSecret: aerie
+  # JWT secret for token validation - CHANGE IN PRODUCTION
+  # For simple setup, use HS256:
+  #   {"type":"HS256","key":"your-256-bit-secret-key-here-min-32-chars!!"}
+  # For OIDC with RS256, use JWKS URL format:
+  #   {"type":"RS256","jwk_url":"https://your-idp/certs","claims_map":{...}}
+  jwtSecret: '{"type":"HS256","key":"aerie-secret-key-for-development-only!!"}'
+
+  devMode: false
+  enableConsole: false
+  logLevel: warn
+
+  resources:
+    requests:
+      memory: "256Mi"
+      cpu: "100m"
+    limits:
+      memory: "1Gi"
+      cpu: "500m"
+
+  service:
+    type: ClusterIP
+    port: 8080
+
+# =============================================================================
+# Merlin - Mission Planning Server & Workers
+# =============================================================================
+merlin:
+  server:
+    enabled: true
+    image:
+      repository: aerie-merlin
+    port: 27183
+    resources:
+      requests:
+        memory: "256Mi"
+        cpu: "50m"
+      limits:
+        memory: "1Gi"
+        cpu: "500m"
+    javaOpts: >-
+      -Dorg.slf4j.simpleLogger.defaultLogLevel=WARN
+      -Dorg.slf4j.simpleLogger.logFile=System.err
+    # Model time reference
+    untruePlanStart: "2000-01-01T11:58:55.816Z"
+    enableContinuousValidation: true
+    validationPollingPeriod: 500
+
+  worker:
+    enabled: true
+    replicas: 1
+    image:
+      repository: aerie-merlin-worker
+    resources:
+      requests:
+        memory: "256Mi"
+        cpu: "50m"
+      limits:
+        memory: "2Gi"
+        cpu: "1000m"
+    javaOpts: >-
+      -Dorg.slf4j.simpleLogger.defaultLogLevel=INFO
+      -Dorg.slf4j.simpleLogger.log.com.zaxxer.hikari=WARN
+      -Dorg.slf4j.simpleLogger.logFile=System.err
+    simulationProgressPollPeriod: 2000
+    # Enable autoscaling
+    autoscaling:
+      enabled: false
+      minReplicas: 1
+      maxReplicas: 5
+      targetCPUUtilizationPercentage: 80
+
+# =============================================================================
+# Scheduler - Scheduling Server & Workers
+# =============================================================================
+scheduler:
+  server:
+    enabled: true
+    image:
+      repository: aerie-scheduler
+    port: 27185
+    resources:
+      requests:
+        memory: "256Mi"
+        cpu: "50m"
+      limits:
+        memory: "1Gi"
+        cpu: "500m"
+    javaOpts: >-
+      -Dorg.slf4j.simpleLogger.defaultLogLevel=WARN
+      -Dorg.slf4j.simpleLogger.logFile=System.err
+
+  worker:
+    enabled: true
+    replicas: 1
+    image:
+      repository: aerie-scheduler-worker
+    resources:
+      requests:
+        memory: "256Mi"
+        cpu: "50m"
+      limits:
+        memory: "2Gi"
+        cpu: "1000m"
+    javaOpts: >-
+      -Dorg.slf4j.simpleLogger.defaultLogLevel=INFO
+      -Dorg.slf4j.simpleLogger.log.com.zaxxer.hikari=WARN
+      -Dorg.slf4j.simpleLogger.logFile=System.err
+    outputMode: UpdateInputPlanWithNewActivities
+    maxCachedSimulationEngines: 1
+    autoscaling:
+      enabled: false
+      minReplicas: 1
+      maxReplicas: 5
+      targetCPUUtilizationPercentage: 80
+
+# =============================================================================
+# Sequencing Server
+# =============================================================================
+sequencing:
+  enabled: true
+  image:
+    repository: aerie-sequencing
+  port: 27184
+
+  resources:
+    requests:
+      memory: "256Mi"
+      cpu: "50m"
+    limits:
+      memory: "1Gi"
+      cpu: "500m"
+
+  logLevel: warn
+  language: "SEQN"  # SEQN, STOL, or TEXT
+  workerNum: 8
+  maxWorkerNum: 8
+  maxWorkerHeapMB: 1000
+  transpilerEnabled: true
+
+# =============================================================================
+# Action Server
+# =============================================================================
+action:
+  enabled: true
+  image:
+    repository: aerie-action-server
+  port: 27186
+
+  resources:
+    requests:
+      memory: "128Mi"
+      cpu: "50m"
+    limits:
+      memory: "512Mi"
+      cpu: "250m"
+
+  logLevel: warn
+  workerNum: 1
+  maxWorkerNum: 1
+
+# =============================================================================
+# Workspace Server
+# =============================================================================
+workspace:
+  enabled: true
+  image:
+    repository: aerie-workspace-server
+  port: 28000
+
+  resources:
+    requests:
+      memory: "128Mi"
+      cpu: "50m"
+    limits:
+      memory: "512Mi"
+      cpu: "250m"
+
+  javaOpts: >-
+    -Dorg.slf4j.simpleLogger.defaultLogLevel=INFO
+    -Dorg.slf4j.simpleLogger.log.com.zaxxer.hikari=INFO
+    -Dorg.slf4j.simpleLogger.logFile=System.err
+
+  persistence:
+    enabled: true
+    size: 5Gi
+    storageClass: ""
+    accessMode: ReadWriteOnce
+
+# =============================================================================
+# Gateway
+# =============================================================================
+gateway:
+  enabled: true
+  image:
+    repository: aerie-gateway
+  port: 9000
+
+  resources:
+    requests:
+      memory: "128Mi"
+      cpu: "50m"
+    limits:
+      memory: "512Mi"
+      cpu: "250m"
+
+  logLevel: warn
+
+  auth:
+    # none, cam, or (future) oidc
+    type: none
+    # CAM configuration (if auth.type=cam)
+    url: ""
+    uiUrl: ""
+    ssoTokenName: '["iPlanetDirectoryPro"]'
+    groupRoleMappings: '{}'
+
+  service:
+    type: ClusterIP
+    port: 9000
+
+# =============================================================================
+# UI
+# =============================================================================
+ui:
+  enabled: true
+  image:
+    repository: aerie-ui
+  port: 80
+
+  resources:
+    requests:
+      memory: "128Mi"
+      cpu: "50m"
+    limits:
+      memory: "512Mi"
+      cpu: "250m"
+
+  # ORIGIN for the UI - set to the external URL users will access
+  origin: "http://localhost:8080"
+
+  # File store prefix for file uploads
+  fileStorePrefix: "/usr/src/app/merlin_file_store/"
+  commandExpansionMode: "typescript"
+
+  # Auth settings
+  auth:
+    ssoEnabled: false
+    oidcEnabled: false
+    # OIDC configuration (when oidcEnabled: true)
+    oidc:
+      wellKnownUrl: ""
+      authorizationUrl: ""
+      tokenUrl: ""
+      logoutUrl: ""
+      jwksUrl: ""
+      issuer: ""
+      clientId: ""
+      # clientSecret should be stored in a K8s secret in production
+      clientSecret: ""
+      # Name of existing secret containing OIDC client secret (key: oidc-client-secret)
+      existingSecret: ""
+      redirectUri: ""
+      audience: ""
+      scopes: "openid profile email"
+
+  # Client-side URLs (for browser access)
+  # These should match your ingress/VirtualService routes
+  clientUrls:
+    gateway: "http://localhost:8080"
+    hasura: "http://localhost:8080/v1/graphql"
+    hasuraWs: "ws://localhost:8080/v1/graphql"
+    action: "http://localhost:8080/action"
+    workspace: "http://localhost:8080/workspace"
+
+  service:
+    type: ClusterIP
+    port: 80
+
+# =============================================================================
+# Shared File Store (PVC)
+# =============================================================================
+fileStore:
+  enabled: true
+  size: 10Gi
+  storageClass: ""
+  # ReadWriteMany required for multi-pod access (merlin server + workers)
+  accessMode: ReadWriteMany
+
+# =============================================================================
+# Database Migrations
+# =============================================================================
+migrations:
+  # Run migrations as a Job on install/upgrade
+  enabled: true
+  image:
+    repository: aerie-postgres
+    tag: ""  # Uses global.imageTag if empty
+  # Timeout for migration job (seconds)
+  timeout: 300
+
+# =============================================================================
+# Istio VirtualService Configuration
+# =============================================================================
+istio:
+  enabled: false
+  # Host for the VirtualService
+  host: aerie.example.com
+  # Gateway to attach to (must exist)
+  gateway: istio-system/default-gateway
+  # CORS configuration for browser access
+  corsPolicy:
+    allowOrigins:
+      - exact: http://localhost:8080
+    allowMethods:
+      - GET
+      - POST
+      - PUT
+      - DELETE
+      - OPTIONS
+    allowHeaders:
+      - Authorization
+      - Content-Type
+      - X-Hasura-Admin-Secret
+      - X-Hasura-Role
+      - X-Hasura-User-Id
+    allowCredentials: true
+
+# =============================================================================
+# Service Account
+# =============================================================================
+serviceAccount:
+  create: true
+  name: ""
+  annotations: {}
+
+# =============================================================================
+# Pod Security
+# =============================================================================
+podSecurityContext:
+  fsGroup: 1000
+
+securityContext: {}
+  # capabilities:
+  #   drop:
+  #   - ALL
+  # readOnlyRootFilesystem: true
+  # runAsNonRoot: true
+  # runAsUser: 1000
+
+# =============================================================================
+# Node Scheduling
+# =============================================================================
+nodeSelector: {}
+tolerations: []
+affinity: {}
