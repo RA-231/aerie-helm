@@ -13,7 +13,7 @@ A Helm chart for deploying [NASA-AMMOS Aerie](https://github.com/NASA-AMMOS/aeri
 ### From OCI Registry
 
 ```bash
-helm install aerie oci://registry.local.intelligent.space/charts/aerie --version 0.1.0
+helm install aerie oci://registry.platform.intelligent.space/aerie/aerie-helm --version 0.1.0
 ```
 
 ### From Source
@@ -27,7 +27,7 @@ helm install aerie .
 ### With Custom Values
 
 ```bash
-helm install aerie oci://registry.local.intelligent.space/charts/aerie \
+helm install aerie oci://registry.platform.intelligent.space/aerie/aerie-helm \
   --version 0.1.0 \
   -f my-values.yaml
 ```

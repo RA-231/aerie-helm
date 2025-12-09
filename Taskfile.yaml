@@ -1,0 +1,250 @@
+version: "3"
+
+vars:
+  CHART_NAME: aerie-helm
+  REGISTRY: registry.platform.intelligent.space
+  REPOSITORY: "{{.REGISTRY}}/aerie"
+  COSIGN_KEY: '{{.COSIGN_KEY | default "cosign.key"}}'
+  COSIGN_PUB: '{{.COSIGN_PUB | default "cosign.pub"}}'
+
+tasks:
+  default:
+    desc: Show available tasks
+    cmds:
+      - task --list
+
+  lint:
+    desc: Lint the Helm chart
+    cmds:
+      - helm lint .
+
+  template:
+    desc: Render chart templates locally (useful for debugging)
+    cmds:
+      - helm template {{.CHART_NAME}} . {{.CLI_ARGS}}
+
+  package:
+    desc: Package the Helm chart
+    cmds:
+      - mkdir -p dist
+      - helm package . -d dist
+    generates:
+      - "dist/{{.CHART_NAME}}-*.tgz"
+
+  login:
+    desc: Login to the OCI registry
+    cmds:
+      - helm registry login {{.REGISTRY}}
+
+  push:
+    desc: Package and push the chart to the OCI registry
+    deps:
+      - lint
+    cmds:
+      - mkdir -p dist
+      - helm package . -d dist
+      - |
+        VERSION=$(grep '^version:' Chart.yaml | awk '{print $2}')
+        helm push dist/{{.CHART_NAME}}-${VERSION}.tgz oci://{{.REPOSITORY}}
+        echo "Pushed {{.CHART_NAME}}:${VERSION} to oci://{{.REPOSITORY}}"
+
+  release:
+    desc: Create a snapshot release (use OFFICIAL=true for official release)
+    vars:
+      OFFICIAL: '{{.OFFICIAL | default "false"}}'
+      BASE_VERSION:
+        sh: grep '^version:' Chart.yaml | awk '{print $2}'
+      GIT_SHORT_SHA:
+        sh: git rev-parse --short HEAD
+      GIT_BRANCH:
+        sh: git rev-parse --abbrev-ref HEAD
+      GIT_DIRTY:
+        sh: git status --porcelain | head -1
+      SUFFIX: '{{if eq .OFFICIAL "true"}}{{else}}-SNAPSHOT.{{.GIT_SHORT_SHA}}{{end}}'
+      RELEASE_VERSION: '{{.BASE_VERSION}}{{.SUFFIX}}'
+    cmds:
+      - |
+        {{if eq .OFFICIAL "true"}}
+        if [ "{{.GIT_BRANCH}}" != "main" ]; then
+          echo "❌ ERROR: Official releases must be from the 'main' branch (current: {{.GIT_BRANCH}})"
+          exit 1
+        fi
+        if [ -n "{{.GIT_DIRTY}}" ]; then
+          echo "❌ ERROR: Official releases require a clean working directory"
+          echo "Uncommitted changes:"
+          git status --short
+          exit 1
+        fi
+        {{end}}
+      - |
+        echo "Releasing {{.CHART_NAME}} version {{.RELEASE_VERSION}}"
+        {{if eq .OFFICIAL "true"}}
+        echo "🚀 OFFICIAL RELEASE"
+        {{else}}
+        echo "📦 Snapshot release (use OFFICIAL=true for official release)"
+        {{end}}
+      - mkdir -p dist
+      - helm package . -d dist --version {{.RELEASE_VERSION}}
+      - |
+        set -e
+        {{if eq .OFFICIAL "true"}}
+        # For official releases: push blob, sign, then tag
+        echo "Pushing to oci://{{.REPOSITORY}} (official release)..."
+
+        # Check for signing key before pushing
+        if [ ! -f "{{.COSIGN_KEY}}" ]; then
+          echo "❌ ERROR: Signing key not found at {{.COSIGN_KEY}}"
+          echo "Run 'task cosign-keygen' to generate a key pair"
+          exit 1
+        fi
+
+        # Push - capture output for digest (may fail on tag due to policy, that's ok)
+        helm push dist/{{.CHART_NAME}}-{{.RELEASE_VERSION}}.tgz oci://{{.REPOSITORY}} 2>&1 | tee dist/.push-output || true
+
+        # Extract digest from output
+        DIGEST=$(grep -oE 'sha256:[a-f0-9]{64}' dist/.push-output | head -1)
+        if [ -z "$DIGEST" ]; then
+          echo "❌ ERROR: Could not extract digest from push output"
+          cat dist/.push-output
+          exit 1
+        fi
+        echo "Pushed blob with digest: $DIGEST"
+
+        # Sign immediately
+        echo "🔐 Signing artifact with cosign..."
+        cosign sign --new-bundle-format=false --use-signing-config=false --key {{.COSIGN_KEY}} {{.REPOSITORY}}/{{.CHART_NAME}}@${DIGEST}
+        echo "✅ Signed: {{.REPOSITORY}}/{{.CHART_NAME}}@${DIGEST}"
+
+        # Now tag should work (artifact is signed)
+        echo "Tagging as {{.RELEASE_VERSION}}..."
+        oras tag {{.REPOSITORY}}/{{.CHART_NAME}}@${DIGEST} {{.RELEASE_VERSION}}
+
+        # Git tag
+        git tag -a "v{{.BASE_VERSION}}" -m "Release v{{.BASE_VERSION}}" 2>/dev/null || echo "Tag v{{.BASE_VERSION}} already exists"
+        echo "Git tagged: v{{.BASE_VERSION}}"
+        {{else}}
+        # For snapshots: just push (no signing required)
+        echo "Pushing to oci://{{.REPOSITORY}} (snapshot)..."
+        helm push dist/{{.CHART_NAME}}-{{.RELEASE_VERSION}}.tgz oci://{{.REPOSITORY}} 2>&1 | tee dist/.push-output
+        DIGEST=$(grep -oE 'sha256:[a-f0-9]{64}' dist/.push-output | head -1)
+        if [ -n "$DIGEST" ]; then
+          echo "Pushed with digest: $DIGEST"
+        fi
+        {{end}}
+      - echo "✅ Released {{.CHART_NAME}}:{{.RELEASE_VERSION}} to oci://{{.REPOSITORY}}"
+      - |
+        {{if eq .OFFICIAL "true"}}
+        echo "✅ Official release complete (signed)"
+        {{end}}
+
+  clean:
+    desc: Remove packaged chart files
+    cmds:
+      - rm -rf dist
+
+  version:
+    desc: Show the current chart version
+    cmds:
+      - |
+        VERSION=$(grep '^version:' Chart.yaml | awk '{print $2}')
+        APP_VERSION=$(grep '^appVersion:' Chart.yaml | awk '{print $2}' | tr -d '"')
+        echo "Chart version: ${VERSION}"
+        echo "App version:   ${APP_VERSION}"
+
+  bump-patch:
+    desc: Bump the patch version (0.0.X)
+    cmds:
+      - |
+        VERSION=$(grep '^version:' Chart.yaml | awk '{print $2}')
+        MAJOR=$(echo $VERSION | cut -d. -f1)
+        MINOR=$(echo $VERSION | cut -d. -f2)
+        PATCH=$(echo $VERSION | cut -d. -f3)
+        NEW_VERSION="${MAJOR}.${MINOR}.$((PATCH + 1))"
+        sed -i '' "s/^version: .*/version: ${NEW_VERSION}/" Chart.yaml
+        echo "Bumped version: ${VERSION} -> ${NEW_VERSION}"
+
+  bump-minor:
+    desc: Bump the minor version (0.X.0)
+    cmds:
+      - |
+        VERSION=$(grep '^version:' Chart.yaml | awk '{print $2}')
+        MAJOR=$(echo $VERSION | cut -d. -f1)
+        MINOR=$(echo $VERSION | cut -d. -f2)
+        NEW_VERSION="${MAJOR}.$((MINOR + 1)).0"
+        sed -i '' "s/^version: .*/version: ${NEW_VERSION}/" Chart.yaml
+        echo "Bumped version: ${VERSION} -> ${NEW_VERSION}"
+
+  bump-major:
+    desc: Bump the major version (X.0.0)
+    cmds:
+      - |
+        VERSION=$(grep '^version:' Chart.yaml | awk '{print $2}')
+        MAJOR=$(echo $VERSION | cut -d. -f1)
+        NEW_VERSION="$((MAJOR + 1)).0.0"
+        sed -i '' "s/^version: .*/version: ${NEW_VERSION}/" Chart.yaml
+        echo "Bumped version: ${VERSION} -> ${NEW_VERSION}"
+
+  install:
+    desc: Install the chart to the current Kubernetes context
+    cmds:
+      - helm install {{.CHART_NAME}} . {{.CLI_ARGS}}
+
+  upgrade:
+    desc: Upgrade the chart in the current Kubernetes context
+    cmds:
+      - helm upgrade {{.CHART_NAME}} . {{.CLI_ARGS}}
+
+  uninstall:
+    desc: Uninstall the chart from the current Kubernetes context
+    cmds:
+      - helm uninstall {{.CHART_NAME}} {{.CLI_ARGS}}
+
+  install-from-registry:
+    desc: Install the chart from the OCI registry
+    cmds:
+      - |
+        VERSION=$(grep '^version:' Chart.yaml | awk '{print $2}')
+        helm install {{.CHART_NAME}} oci://{{.REPOSITORY}}/{{.CHART_NAME}} --version ${VERSION} {{.CLI_ARGS}}
+
+  show-oci-url:
+    desc: Show the OCI URL for the chart
+    cmds:
+      - |
+        VERSION=$(grep '^version:' Chart.yaml | awk '{print $2}')
+        echo "oci://{{.REPOSITORY}}/{{.CHART_NAME}}:${VERSION}"
+
+  verify:
+    desc: Verify the signature of a released chart
+    vars:
+      VERSION: '{{.VERSION | default ""}}'
+    cmds:
+      - |
+        if [ ! -f "{{.COSIGN_PUB}}" ]; then
+          echo "❌ ERROR: Public key not found at {{.COSIGN_PUB}}"
+          exit 1
+        fi
+        if [ -z "{{.VERSION}}" ]; then
+          VERSION=$(grep '^version:' Chart.yaml | awk '{print $2}')
+        else
+          VERSION="{{.VERSION}}"
+        fi
+        echo "Verifying {{.REPOSITORY}}/{{.CHART_NAME}}:${VERSION}"
+        cosign verify --key {{.COSIGN_PUB}} {{.REPOSITORY}}/{{.CHART_NAME}}:${VERSION}
+
+  cosign-keygen:
+    desc: Generate a new cosign key pair for signing
+    cmds:
+      - |
+        if [ -f "{{.COSIGN_KEY}}" ]; then
+          echo "⚠️  Key already exists at {{.COSIGN_KEY}}"
+          echo "Delete it first if you want to generate a new one"
+          exit 1
+        fi
+        echo "Generating cosign key pair..."
+        cosign generate-key-pair
+        echo ""
+        echo "✅ Key pair generated:"
+        echo "   Private key: {{.COSIGN_KEY}} (keep secret!)"
+        echo "   Public key:  {{.COSIGN_PUB}} (distribute to verifiers)"
+        echo ""
+        echo "⚠️  IMPORTANT: Add cosign.key to .gitignore!"
