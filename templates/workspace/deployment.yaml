@@ -57,12 +57,12 @@ spec:
             - name: HASURA_GRAPHQL_JWT_SECRET
               valueFrom:
                 secretKeyRef:
-                  name: {{ include "aerie.fullname" . }}-hasura-secrets
+                  name: {{ .Values.hasura.existingSecret | default (printf "%s-hasura-secrets" (include "aerie.fullname" .)) }}
                   key: jwt-secret
             - name: HASURA_GRAPHQL_ADMIN_SECRET
               valueFrom:
                 secretKeyRef:
-                  name: {{ include "aerie.fullname" . }}-hasura-secrets
+                  name: {{ .Values.hasura.existingSecret | default (printf "%s-hasura-secrets" (include "aerie.fullname" .)) }}
                   key: admin-secret
             - name: HASURA_GRAPHQL_URL
               value: {{ include "aerie.hasura.graphqlUrl" . | quote }}

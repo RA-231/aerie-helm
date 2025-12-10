@@ -54,7 +54,7 @@ spec:
             - name: HASURA_GRAPHQL_JWT_SECRET
               valueFrom:
                 secretKeyRef:
-                  name: {{ include "aerie.fullname" . }}-hasura-secrets
+                  name: {{ .Values.hasura.existingSecret | default (printf "%s-hasura-secrets" (include "aerie.fullname" .)) }}
                   key: jwt-secret
             # Hasura URLs - internal K8s service names
             - name: HASURA_API_URL
