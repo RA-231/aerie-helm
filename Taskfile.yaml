@@ -49,7 +49,9 @@ tasks:
         echo "Pushed {{.CHART_NAME}}:${VERSION} to oci://{{.REPOSITORY}}"
 
   release:
-    desc: Create a snapshot release (use OFFICIAL=true for official release)
+    desc: Create a signed release (use OFFICIAL=true for official release)
+    deps:
+      - lint
     vars:
       OFFICIAL: '{{.OFFICIAL | default "false"}}'
       BASE_VERSION:
@@ -63,6 +65,7 @@ tasks:
       SUFFIX: '{{if eq .OFFICIAL "true"}}{{else}}-SNAPSHOT.{{.GIT_SHORT_SHA}}{{end}}'
       RELEASE_VERSION: '{{.BASE_VERSION}}{{.SUFFIX}}'
     cmds:
+      # Validate official release requirements
       - |
         {{if eq .OFFICIAL "true"}}
         if [ "{{.GIT_BRANCH}}" != "main" ]; then
@@ -71,71 +74,53 @@ tasks:
         fi
         if [ -n "{{.GIT_DIRTY}}" ]; then
           echo "❌ ERROR: Official releases require a clean working directory"
-          echo "Uncommitted changes:"
           git status --short
           exit 1
         fi
         {{end}}
+      # Check for signing key
       - |
-        echo "Releasing {{.CHART_NAME}} version {{.RELEASE_VERSION}}"
-        {{if eq .OFFICIAL "true"}}
-        echo "🚀 OFFICIAL RELEASE"
-        {{else}}
-        echo "📦 Snapshot release (use OFFICIAL=true for official release)"
-        {{end}}
-      - mkdir -p dist
-      - helm package . -d dist --version {{.RELEASE_VERSION}}
-      - |
-        set -e
-        {{if eq .OFFICIAL "true"}}
-        # For official releases: push blob, sign, then tag
-        echo "Pushing to oci://{{.REPOSITORY}} (official release)..."
-
-        # Check for signing key before pushing
         if [ ! -f "{{.COSIGN_KEY}}" ]; then
           echo "❌ ERROR: Signing key not found at {{.COSIGN_KEY}}"
           echo "Run 'task cosign-keygen' to generate a key pair"
           exit 1
         fi
-
-        # Push - capture output for digest (may fail on tag due to policy, that's ok)
+      # Package
+      - mkdir -p dist
+      - helm package . -d dist --version {{.RELEASE_VERSION}}
+      - |
+        echo "📦 Releasing {{.CHART_NAME}}:{{.RELEASE_VERSION}}"
+        {{if eq .OFFICIAL "true"}}
+        echo "   Type: OFFICIAL"
+        {{else}}
+        echo "   Type: SNAPSHOT"
+        {{end}}
+      # Push, sign, and tag
+      - |
+        set -e
         helm push dist/{{.CHART_NAME}}-{{.RELEASE_VERSION}}.tgz oci://{{.REPOSITORY}} 2>&1 | tee dist/.push-output || true
-
-        # Extract digest from output
         DIGEST=$(grep -oE 'sha256:[a-f0-9]{64}' dist/.push-output | head -1)
         if [ -z "$DIGEST" ]; then
           echo "❌ ERROR: Could not extract digest from push output"
           cat dist/.push-output
           exit 1
         fi
-        echo "Pushed blob with digest: $DIGEST"
+        echo "✅ Pushed with digest: $DIGEST"
 
-        # Sign immediately
-        echo "🔐 Signing artifact with cosign..."
+        echo "🔐 Signing..."
         cosign sign --new-bundle-format=false --use-signing-config=false --key {{.COSIGN_KEY}} {{.REPOSITORY}}/{{.CHART_NAME}}@${DIGEST}
-        echo "✅ Signed: {{.REPOSITORY}}/{{.CHART_NAME}}@${DIGEST}"
+        echo "✅ Signed"
 
-        # Now tag should work (artifact is signed)
-        echo "Tagging as {{.RELEASE_VERSION}}..."
+        echo "🏷️  Tagging as {{.RELEASE_VERSION}}..."
         oras tag {{.REPOSITORY}}/{{.CHART_NAME}}@${DIGEST} {{.RELEASE_VERSION}}
-
-        # Git tag
-        git tag -a "v{{.BASE_VERSION}}" -m "Release v{{.BASE_VERSION}}" 2>/dev/null || echo "Tag v{{.BASE_VERSION}} already exists"
-        echo "Git tagged: v{{.BASE_VERSION}}"
-        {{else}}
-        # For snapshots: just push (no signing required)
-        echo "Pushing to oci://{{.REPOSITORY}} (snapshot)..."
-        helm push dist/{{.CHART_NAME}}-{{.RELEASE_VERSION}}.tgz oci://{{.REPOSITORY}} 2>&1 | tee dist/.push-output
-        DIGEST=$(grep -oE 'sha256:[a-f0-9]{64}' dist/.push-output | head -1)
-        if [ -n "$DIGEST" ]; then
-          echo "Pushed with digest: $DIGEST"
-        fi
-        {{end}}
-      - echo "✅ Released {{.CHART_NAME}}:{{.RELEASE_VERSION}} to oci://{{.REPOSITORY}}"
+        echo "✅ Tagged"
+      # Git tag for official releases
       - |
         {{if eq .OFFICIAL "true"}}
-        echo "✅ Official release complete (signed)"
+        git tag -a "v{{.BASE_VERSION}}" -m "Release v{{.BASE_VERSION}}" 2>/dev/null || echo "Git tag v{{.BASE_VERSION}} already exists"
+        echo "✅ Git tagged: v{{.BASE_VERSION}}"
         {{end}}
+      - echo "✅ Released {{.CHART_NAME}}:{{.RELEASE_VERSION}} to oci://{{.REPOSITORY}}"
 
   clean:
     desc: Remove packaged chart files
