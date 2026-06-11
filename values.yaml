@@ -228,7 +228,7 @@ sequencing:
 action:
   enabled: true
   image:
-    repository: aerie-action-server
+    repository: aerie-action
   port: 27186
 
   resources:
@@ -249,7 +249,7 @@ action:
 workspace:
   enabled: true
   image:
-    repository: aerie-workspace-server
+    repository: aerie-workspace
   port: 28000
 
   resources:
