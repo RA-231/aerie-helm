@@ -411,6 +411,33 @@ istio:
     allowCredentials: true
 
 # =============================================================================
+# Gateway API (Gateway + HTTPRoute)
+# =============================================================================
+# Vendor-neutral routing via the Kubernetes Gateway API. Routes every Aerie
+# component under a single host so the browser uses one origin (no CORS needed).
+# The UI's ui.clientUrls / ui.origin must point at this same host. Requires a
+# Gateway API implementation in the cluster (e.g. Istio: gatewayClassName istio).
+gatewayApi:
+  enabled: false
+  # GatewayClass provided by your Gateway API implementation.
+  gatewayClassName: istio
+  # Create the Gateway resource. Set false to attach the HTTPRoute to a
+  # pre-existing Gateway (set existingGateway below).
+  createGateway: true
+  existingGateway:
+    name: ""
+    namespace: ""
+  # Hostname for the listener and routes. Empty matches any host (convenient for
+  # local access via port-forward / localhost). Set a real hostname in shared
+  # clusters.
+  host: ""
+  listener:
+    name: http
+    port: 80
+    protocol: HTTP
+  annotations: {}
+
+# =============================================================================
 # Service Account
 # =============================================================================
 serviceAccount:

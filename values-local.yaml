@@ -17,3 +17,24 @@ nodeSelector:
 # on the same node can all mount the same volume.
 fileStore:
   accessMode: ReadWriteOnce
+
+# Route every component through a single origin via the Gateway API, with Istio
+# as the implementation. Host is left empty so it matches any Host header, which
+# lets you reach it through a simple port-forward to the Istio-provisioned
+# gateway on localhost:8080 (matching ui.clientUrls / ui.origin, which already
+# default to http://localhost:8080). Because the UI and all its API calls share
+# that one origin, no CORS configuration is required.
+#
+# Prerequisites (install once):
+#   kubectl apply -f https://github.com/kubernetes-sigs/gateway-api/releases/download/v1.2.1/standard-install.yaml
+#   helm repo add istio https://istio-release.storage.googleapis.com/charts
+#   helm install istio-base istio/base -n istio-system --create-namespace
+#   helm install istiod istio/istiod -n istio-system --wait
+# After install, port-forward the auto-provisioned gateway:
+#   kubectl -n aerie port-forward svc/aerie-aerie-helm-router-istio 8080:80
+# Then open http://localhost:8080
+gatewayApi:
+  enabled: true
+  gatewayClassName: istio
+  createGateway: true
+  host: ""

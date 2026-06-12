@@ -35,28 +35,16 @@ spec:
             port:
               number: {{ .Values.hasura.service.port }}
 
-    # Gateway API
+    # Aerie gateway - only the paths the browser calls on it directly (file
+    # store + external-source uploads). /auth/* and /health are SvelteKit routes
+    # served by the UI itself (the UI's /auth/login sets the session cookie and
+    # proxies to the gateway server-side), so they must NOT be routed here or
+    # login succeeds without a cookie and bounces back to /login.
     - match:
-        - uri:
-            prefix: /api/
-      corsPolicy:
-        {{- toYaml .Values.istio.corsPolicy | nindent 8 }}
-      rewrite:
-        uri: /
-      route:
-        - destination:
-            host: {{ include "aerie.fullname" . }}-gateway
-            port:
-              number: {{ .Values.gateway.service.port }}
-
-    # Gateway root endpoints (health, auth, file operations)
-    - match:
-        - uri:
-            prefix: /auth/
         - uri:
             prefix: /file
         - uri:
-            exact: /health
+            prefix: /uploadExternalSource
       corsPolicy:
         {{- toYaml .Values.istio.corsPolicy | nindent 8 }}
       route:
