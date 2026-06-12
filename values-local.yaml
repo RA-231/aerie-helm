@@ -1,0 +1,40 @@
+# Local development overrides for Docker Desktop / single-node-style runs.
+# Usage:
+#   helm install aerie . -n aerie --create-namespace \
+#     --kube-context docker-desktop -f values-local.yaml
+#
+# Why these overrides:
+# - The shared file store PVC is ReadWriteMany, but the local-path provisioner
+#   backs it with a per-node hostPath. On a multi-node local cluster, pods that
+#   share that volume must co-locate or they won't actually see the same files.
+#   Pinning every Aerie pod to one node makes the RWX hostPath behave.
+nodeSelector:
+  kubernetes.io/hostname: desktop-worker
+
+# The local-path provisioner only supports ReadWriteOnce. The shared file store
+# defaults to ReadWriteMany, which leaves the PVC Pending forever locally.
+# Because all pods are pinned to one node above, RWO is safe — co-located pods
+# on the same node can all mount the same volume.
+fileStore:
+  accessMode: ReadWriteOnce
+
+# Route every component through a single origin via the Gateway API, with Istio
+# as the implementation. Host is left empty so it matches any Host header, which
+# lets you reach it through a simple port-forward to the Istio-provisioned
+# gateway on localhost:8080 (matching ui.clientUrls / ui.origin, which already
+# default to http://localhost:8080). Because the UI and all its API calls share
+# that one origin, no CORS configuration is required.
+#
+# Prerequisites (install once):
+#   kubectl apply -f https://github.com/kubernetes-sigs/gateway-api/releases/download/v1.2.1/standard-install.yaml
+#   helm repo add istio https://istio-release.storage.googleapis.com/charts
+#   helm install istio-base istio/base -n istio-system --create-namespace
+#   helm install istiod istio/istiod -n istio-system --wait
+# After install, port-forward the auto-provisioned gateway:
+#   kubectl -n aerie port-forward svc/aerie-aerie-helm-router-istio 8080:80
+# Then open http://localhost:8080
+gatewayApi:
+  enabled: true
+  gatewayClassName: istio
+  createGateway: true
+  host: ""

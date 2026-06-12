@@ -1,0 +1,100 @@
+{{- if .Values.gatewayApi.enabled }}
+{{- $fullName := include "aerie.fullname" . -}}
+# Single HTTPRoute fronting every component on one origin. Gateway API resolves
+# rule precedence by match specificity (longest path prefix wins), so the "/"
+# catch-all to the UI is always the least specific. /action and /workspace use a
+# URLRewrite filter to strip their prefix, since those servers serve from "/".
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: {{ $fullName }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "aerie.labels" . | nindent 4 }}
+spec:
+  parentRefs:
+    {{- if .Values.gatewayApi.createGateway }}
+    - name: {{ $fullName }}-router
+    {{- else }}
+    - name: {{ required "gatewayApi.existingGateway.name is required when gatewayApi.createGateway=false" .Values.gatewayApi.existingGateway.name }}
+      {{- with .Values.gatewayApi.existingGateway.namespace }}
+      namespace: {{ . }}
+      {{- end }}
+    {{- end }}
+  {{- with .Values.gatewayApi.host }}
+  hostnames:
+    - {{ . | quote }}
+  {{- end }}
+  rules:
+    # Hasura GraphQL / metadata / console
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /v1/graphql
+        - path:
+            type: PathPrefix
+            value: /v1/query
+        - path:
+            type: PathPrefix
+            value: /v1/metadata
+        - path:
+            type: PathPrefix
+            value: /v1/version
+        - path:
+            type: PathPrefix
+            value: /console
+      backendRefs:
+        - name: {{ $fullName }}-hasura
+          port: {{ .Values.hasura.service.port }}
+    # Aerie gateway - only the paths the browser calls on it directly (file
+    # store + external-source uploads). NOTE: /auth/* and /health are SvelteKit
+    # routes served by the UI itself (the UI's /auth/login sets the session
+    # cookie and proxies to the gateway server-side), so they must NOT be routed
+    # here or login succeeds without a cookie and bounces back to /login.
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /file
+        - path:
+            type: PathPrefix
+            value: /uploadExternalSource
+      backendRefs:
+        - name: {{ $fullName }}-gateway
+          port: {{ .Values.gateway.service.port }}
+    # Action server (strip /action prefix; server serves from /)
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /action
+      filters:
+        - type: URLRewrite
+          urlRewrite:
+            path:
+              type: ReplacePrefixMatch
+              replacePrefixMatch: /
+      backendRefs:
+        - name: {{ $fullName }}-action
+          port: {{ .Values.action.port }}
+    # Workspace server (strip /workspace prefix; server serves from /)
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /workspace
+      filters:
+        - type: URLRewrite
+          urlRewrite:
+            path:
+              type: ReplacePrefixMatch
+              replacePrefixMatch: /
+      backendRefs:
+        - name: {{ $fullName }}-workspace
+          port: {{ .Values.workspace.port }}
+    # UI - catch-all (least specific)
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /
+      backendRefs:
+        - name: {{ $fullName }}-ui
+          port: {{ .Values.ui.service.port }}
+{{- end }}

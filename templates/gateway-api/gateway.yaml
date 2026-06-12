@@ -1,0 +1,25 @@
+{{- if and .Values.gatewayApi.enabled .Values.gatewayApi.createGateway }}
+apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
+metadata:
+  name: {{ include "aerie.fullname" . }}-router
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "aerie.labels" . | nindent 4 }}
+  {{- with .Values.gatewayApi.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  gatewayClassName: {{ .Values.gatewayApi.gatewayClassName }}
+  listeners:
+    - name: {{ .Values.gatewayApi.listener.name }}
+      port: {{ .Values.gatewayApi.listener.port }}
+      protocol: {{ .Values.gatewayApi.listener.protocol }}
+      {{- with .Values.gatewayApi.host }}
+      hostname: {{ . | quote }}
+      {{- end }}
+      allowedRoutes:
+        namespaces:
+          from: Same
+{{- end }}
